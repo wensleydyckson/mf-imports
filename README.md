@@ -85,16 +85,23 @@ sem internet.
 
 ## Publicar uma versão nova
 
-1. Substitua o `index.html` no repositório (**Add file → Upload files**, ou
-   `git push`).
-2. Abra o `sw.js` e mude a linha do cache:
+> O `index.html` é **gerado**. Não edite ele: a fonte é o `caderno.html`, que
+> fica um nível acima desta pasta e tem cópia versionada em [`fonte/`](fonte/).
+> O [`fonte/CLAUDE.md`](fonte/CLAUDE.md) explica o projeto inteiro.
+
+1. Edite o `caderno.html` e suba o `VERSAO` dentro dele (`AAAA.MM.DD-n`).
+2. Suba o cache no `sw.js`:
 
    ```js
-   const CACHE = "mf-imports-v1";   →   const CACHE = "mf-imports-v2";
+   const CACHE = "mf-imports-v8";   →   const CACHE = "mf-imports-v9";
    ```
 
    Sem isso, quem já instalou continua vendo a versão antiga, porque o app
    guarda uma cópia local para funcionar offline.
+3. Rode `python build.py` na raiz do projeto e dê `git push` aqui dentro.
+
+Para conferir se chegou (o GitHub leva 1 a 3 minutos), abra o app, vá em
+**Mais** e veja se o número da versão bate.
 
 ---
 
