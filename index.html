@@ -577,6 +577,10 @@ const LS_KEY = "mf_imports_v1";
 const SNAP_KEY = "mf_imports_snap";   /* como estava no inicio do dia */
 const CFG_KEY = "mf_imports_cfg";     /* preferencias do aparelho, nao sincroniza */
 
+const VERSAO = "2026.09.07-5";
+let temSW = false;                    /* so o site publicado tem service worker */
+let recarregandoPorAtualizacao = false;
+
 const cfg = { ultimoBackup: null, semExemplos: false };
 
 /* Safari em aba privada, ou com dados de site bloqueados, aceita a escrita e
@@ -600,6 +604,41 @@ function gravarCfg(){
   try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
 }
 function marcarBackup(){ cfg.ultimoBackup = hoje(); gravarCfg(); render(); }
+
+/* Pede ao navegador para reavaliar o service worker. Quando ha versao nova, o
+   controllerchange recarrega a pagina sozinho. */
+async function verificarAtualizacao(silencioso){
+  if (!temSW) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.update();
+    if (!silencioso) toast("Já está na versão mais recente.");
+  } catch (e) {
+    if (!silencioso) toast("Não consegui verificar agora.");
+  }
+}
+
+/* O botao de ultimo caso: descarta o app guardado e busca tudo de novo.
+   Mexe so no cache — os cadastros ficam onde estao. */
+async function forcarAtualizacao(){
+  const ok = await perguntar("Buscar a versão nova?",
+    "O app vai ser baixado de novo do zero. Seus cadastros não são apagados: " +
+    "vendas, compras, clientes e perfumes continuam aqui.", "Atualizar");
+  if (!ok) return;
+  toast("Atualizando…");
+  try {
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
+    }
+    if (window.caches) {
+      const ks = await caches.keys();
+      for (const k of ks) await caches.delete(k);
+    }
+  } catch (e) {}
+  recarregandoPorAtualizacao = true;
+  location.reload();
+}
 function diasSemBackup(){ return cfg.ultimoBackup ? -diasAte(cfg.ultimoBackup) : null; }
 
 const S = { produtos:[], clientes:[], fornecedores:[], compras:[], vendas:[] };
@@ -2174,6 +2213,18 @@ function telaMais(){
           : "Os dados estão salvos só neste aparelho e neste navegador. Faça um backup de vez em quando na aba Backup.") +
       '</p>' +
     '</div>' +
+    '<div class="card" style="padding:14px">' +
+      '<div class="spread"><span class="eyebrow">Versão instalada</span>' +
+        '<span class="badge b-neutral mono">' + VERSAO + '</span></div>' +
+      (temSW
+        ? '<p class="faint" style="margin:9px 0 11px;line-height:1.5">O app se atualiza sozinho, ' +
+            'mas o iPhone às vezes segura a versão antiga. Se algo que combinamos não apareceu, ' +
+            'toque abaixo. Seus cadastros não são apagados.</p>' +
+          '<button class="btn btn-block" data-atualizar="1">Buscar versão nova</button>'
+        : '<p class="faint" style="margin:9px 0 0;line-height:1.5">Esta é a versão aberta pela Claude, ' +
+            'sempre a mais recente.</p>') +
+    '</div>' +
+
     '<div style="text-align:center;padding:12px 0 4px">' +
       '<span class="marca" style="width:64px;height:64px;margin:0 auto 10px" role="img" aria-label="MF Imports"></span>' +
       '<p class="faint" style="margin:0;font-size:10px;letter-spacing:.18em;text-transform:uppercase">' +
@@ -2721,6 +2772,7 @@ document.addEventListener("click", async e => {
   if (exp) { exportar(exp.dataset.exp); return; }
 
   if (t.closest("[data-sem-exemplos]")) { esconderExemplos(); return; }
+  if (t.closest("[data-atualizar]")) { forcarAtualizacao(); return; }
   if (t.closest("[data-enviar]")) { enviarBackup(); return; }
   if (t.closest("[data-restaurar-snap]")) { restaurarSnapshot(); return; }
   if (t.closest("[data-imp]")) { importar(); return; }
@@ -2761,8 +2813,22 @@ render();
 if (window.claude && typeof window.claude.use === "function") iniciarNuvem();
 
 if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
+  temSW = true;
+  /* updateViaCache "none": o proprio sw.js nunca vem do cache do navegador,
+     senao o iPhone descobre a versao nova tarde demais. */
   window.addEventListener("load", function(){
-    navigator.serviceWorker.register("sw.js").catch(function(){});
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+      .then(function(reg){ if (reg) reg.update().catch(function(){}); })
+      .catch(function(){});
+  });
+  navigator.serviceWorker.addEventListener("controllerchange", function(){
+    if (recarregandoPorAtualizacao) return;
+    recarregandoPorAtualizacao = true;
+    location.reload();
+  });
+  /* Toda vez que ela volta para o app, checa se saiu versao nova. */
+  document.addEventListener("visibilitychange", function(){
+    if (!document.hidden) verificarAtualizacao(true);
   });
 }
 
