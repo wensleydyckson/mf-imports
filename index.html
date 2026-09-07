@@ -285,6 +285,17 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
   text-decoration:underline;text-underline-offset:2px}
 .itemrow select{font-size:16px}
 
+/* Numero nao pode ser truncado: os valores do perfume viram colunas. */
+.item-col{flex-direction:column;align-items:stretch;gap:10px}
+.item-topo{display:flex;align-items:center;gap:11px;width:100%;min-width:0}
+.precos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  padding-top:10px;border-top:1px solid var(--line)}
+.precos .k{font-size:9.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+.precos .v{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:13.5px;font-weight:600;margin-top:3px;white-space:nowrap}
+.precos .vazio{color:var(--ink-3);font-weight:500}
+
 .toggle{display:flex;align-items:flex-start;gap:11px;padding:12px;border-radius:12px;
   background:var(--surface);border:1px solid var(--line-2);text-align:left;width:100%}
 .toggle b{display:block;font-size:14px;margin-bottom:2px}
@@ -577,7 +588,7 @@ const LS_KEY = "mf_imports_v1";
 const SNAP_KEY = "mf_imports_snap";   /* como estava no inicio do dia */
 const CFG_KEY = "mf_imports_cfg";     /* preferencias do aparelho, nao sincroniza */
 
-const VERSAO = "2026.09.07-5";
+const VERSAO = "2026.09.07-7";
 let temSW = false;                    /* so o site publicado tem service worker */
 let recarregandoPorAtualizacao = false;
 
@@ -839,14 +850,24 @@ function estoqueDe(pid){
   d.vendas.forEach(v => (v.itens||[]).forEach(it => { if (it.produtoId === pid) e -= Number(it.qtd)||0; }));
   return e;
 }
-function custoMedio(pid){
+/* Media ponderada do que ela realmente pagou nas compras daquele perfume. */
+function custoDeCompras(pid){
   const d = D();
   let q = 0, t = 0;
   d.compras.forEach(c => (c.itens||[]).forEach(it => {
     if (it.produtoId === pid) { q += Number(it.qtd)||0; t += (Number(it.qtd)||0) * (Number(it.custoUnit)||0); }
   }));
-  if (q > 0) return r2(t / q);
-  const ult = d.vendas.flatMap(v => v.itens||[]).filter(it => it.produtoId === pid).pop();
+  return q > 0 ? r2(t / q) : 0;
+}
+
+/* Compra registrada e a verdade. Sem nenhuma, vale o custo do cadastro do
+   perfume; sem ele, o ultimo custo que ficou gravado numa venda. */
+function custoMedio(pid){
+  const daCompra = custoDeCompras(pid);
+  if (daCompra > 0) return daCompra;
+  const p = D().produtos.find(x => x.id === pid);
+  if (p && Number(p.custo) > 0) return r2(Number(p.custo));
+  const ult = D().vendas.flatMap(v => v.itens||[]).filter(it => it.produtoId === pid).pop();
   return ult ? Number(ult.custoUnit)||0 : 0;
 }
 
@@ -1796,24 +1817,58 @@ function alternarPago(col, regId, idx){
 }
 
 function formProduto(prod){
-  const p = prod || { id:null, nome:"", marca:"", ml:"", preco:"" };
+  const p = prod || { id:null, nome:"", marca:"", ml:"", preco:"", custo:"" };
+  const daCompra = p.id ? custoDeCompras(p.id) : 0;
+
   const corpo =
     '<div class="field"><label>Nome do perfume</label><input type="text" id="pNome" value="' + esc(p.nome) + '" placeholder="Ex.: Khamrah"></div>' +
     '<div class="field-2">' +
       '<div class="field"><label>Marca</label><input type="text" id="pMarca" value="' + esc(p.marca||"") + '" placeholder="Ex.: Lattafa"></div>' +
       '<div class="field"><label>Tamanho (ml)</label><input type="text" inputmode="numeric" id="pMl" value="' + esc(p.ml||"") + '" placeholder="100"></div>' +
     '</div>' +
-    '<div class="field"><label>Preço de venda</label>' +
-      '<input type="text" inputmode="decimal" class="money-in" id="pPreco" value="' + esc(p.preco||"") + '" placeholder="0,00">' +
-      '<span class="hint">Aparece preenchido automaticamente quando você lança uma venda.</span></div>' +
+    '<div class="field-2">' +
+      '<div class="field"><label>Custo un.</label>' +
+        '<input type="text" inputmode="decimal" class="money-in" id="pCusto" value="' + esc(p.custo||"") + '" placeholder="0,00"></div>' +
+      '<div class="field"><label>Preço de venda</label>' +
+        '<input type="text" inputmode="decimal" class="money-in" id="pPreco" value="' + esc(p.preco||"") + '" placeholder="0,00"></div>' +
+    '</div>' +
+    '<div class="margem" id="margemProduto"></div>' +
+    (daCompra > 0
+      ? '<div class="note"><span>Suas compras deste perfume dão custo médio de <b>' + R$(daCompra) +
+        '</b>. É esse valor que o app usa para calcular o lucro — o custo aqui em cima só vale ' +
+        'enquanto não houver compra registrada.</span></div>'
+      : '<span class="hint">O custo é o que você paga no distribuidor. Quando você registrar a ' +
+        'compra, o valor dela passa a valer no lugar deste.</span>') +
     (p.id ? '<div class="card" style="padding:13px">' +
       '<div class="kv"><span class="k">Em estoque</span><span class="v mono">' + estoqueDe(p.id) + ' un.</span></div>' +
-      '<div class="kv"><span class="k">Custo médio</span><span class="v mono">' + R$(custoMedio(p.id)) + '</span></div>' +
+      '<div class="kv"><span class="k">Custo usado no lucro</span><span class="v mono">' + R$(custoMedio(p.id)) + '</span></div>' +
       '</div>' + histProduto(p.id) : "");
+
   const foot =
     (p.id && !emDemo() ? '<button class="btn btn-danger" data-apagar-produto="' + p.id + '">Excluir</button>' : "") +
     '<button class="btn btn-primary btn-block" data-salvar-produto="1">Salvar</button>';
+
   abrirSheet(p.id ? "Editar perfume" : "Novo perfume", corpo, foot);
+
+  /* Margem ao vivo, para ela ver o lucro enquanto digita. */
+  function margemProduto(){
+    const custo = parseMoney($("#pCusto").value), preco = parseMoney($("#pPreco").value);
+    const alvo = $("#margemProduto");
+    if (!alvo) return;
+    if (custo > 0 && preco > custo) {
+      alvo.innerHTML = '<span class="ok">Lucro de ' + R$(r2(preco - custo)) + ' por unidade</span> &middot; ' +
+        Math.round((preco - custo) / preco * 100) + '% de margem';
+    } else if (custo > 0 && preco > 0) {
+      alvo.innerHTML = '<span class="ruim">Esse preço está abaixo do custo.</span>';
+    } else {
+      alvo.innerHTML = "Preencha os dois para ver o lucro por unidade.";
+    }
+  }
+  $("#sheetBody").addEventListener("input", e => {
+    if (e.target.id === "pCusto" || e.target.id === "pPreco") margemProduto();
+  });
+  margemProduto();
+
   sheetSalvar = () => {
     const nome = $("#pNome").value.trim();
     if (!nome) { toast("Dê um nome ao perfume."); return; }
@@ -1821,6 +1876,7 @@ function formProduto(prod){
       id: p.id || uid(), nome: nome,
       marca: $("#pMarca").value.trim(),
       ml: $("#pMl").value.trim(),
+      custo: parseMoney($("#pCusto").value),
       preco: parseMoney($("#pPreco").value)
     });
     fecharSheet(); toast("Perfume salvo.");
@@ -2172,14 +2228,24 @@ function telaEstoque(){
         const cm = custoMedio(p.id), pv = Number(p.preco) || 0;
         const marg = pv > 0 && cm > 0 ? Math.round((pv - cm) / pv * 100) : null;
         const cls = e <= 0 ? "b-bad" : e <= 2 ? "b-warn" : "b-good";
-        return '<button class="item" data-produto="' + p.id + '">' +
-          '<div class="mrk">' + esc(p.nome.trim().charAt(0).toUpperCase()) + '</div>' +
-          '<div class="item-main"><div class="item-t">' + esc(p.nome) +
-            (p.ml ? ' <span class="faint">' + esc(p.ml) + 'ml</span>' : "") + '</div>' +
-            '<div class="item-s">' + (p.marca ? esc(p.marca) + " &middot; " : "") +
-              "custo " + R$(cm) + " &middot; venda " + R$(pv) +
-              (marg !== null ? " &middot; " + marg + "%" : "") + '</div></div>' +
-          '<div class="item-r"><span class="badge ' + cls + '">' + e + ' un.</span></div>' + ICON.chev +
+        const coluna = (k, v, vazio) =>
+          '<div><div class="k">' + k + '</div>' +
+          '<div class="v' + (vazio ? " vazio" : "") + '">' + v + '</div></div>';
+        return '<button class="item item-col" data-produto="' + p.id + '">' +
+          '<div class="item-topo">' +
+            '<div class="mrk">' + esc(p.nome.trim().charAt(0).toUpperCase() || "?") + '</div>' +
+            '<div class="item-main">' +
+              '<div class="item-t">' + esc(p.nome) +
+                (p.ml ? ' <span class="faint">' + esc(p.ml) + 'ml</span>' : "") + '</div>' +
+              (p.marca ? '<div class="item-s">' + esc(p.marca) + '</div>' : "") +
+            '</div>' +
+            '<span class="badge ' + cls + '">' + e + ' un.</span>' + ICON.chev +
+          '</div>' +
+          '<div class="precos">' +
+            coluna("Pagou", cm > 0 ? R$(cm) : "—", cm <= 0) +
+            coluna("Vende", pv > 0 ? R$(pv) : "—", pv <= 0) +
+            coluna("Margem", marg !== null ? marg + "%" : "—", marg === null) +
+          '</div>' +
         '</button>';
       }).join("") + '</div>' +
     '</div>';

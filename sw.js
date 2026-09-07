@@ -2,7 +2,7 @@
    Faz o app abrir mesmo sem internet. Ao publicar uma versão nova do
    index.html, troque o número em CACHE para forçar a atualização. */
 
-const CACHE = "mf-imports-v5";
+const CACHE = "mf-imports-v7";
 
 const ESSENCIAIS = [
   "./",
