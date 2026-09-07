@@ -588,7 +588,7 @@ const LS_KEY = "mf_imports_v1";
 const SNAP_KEY = "mf_imports_snap";   /* como estava no inicio do dia */
 const CFG_KEY = "mf_imports_cfg";     /* preferencias do aparelho, nao sincroniza */
 
-const VERSAO = "2026.09.07-7";
+const VERSAO = "2026.09.07-8";
 let temSW = false;                    /* so o site publicado tem service worker */
 let recarregandoPorAtualizacao = false;
 
@@ -1848,7 +1848,7 @@ function formProduto(prod){
     (p.id && !emDemo() ? '<button class="btn btn-danger" data-apagar-produto="' + p.id + '">Excluir</button>' : "") +
     '<button class="btn btn-primary btn-block" data-salvar-produto="1">Salvar</button>';
 
-  abrirSheet(p.id ? "Editar perfume" : "Novo perfume", corpo, foot);
+  abrirSheet(p.id ? "Ficha do perfume" : "Novo perfume", corpo, foot);
 
   /* Margem ao vivo, para ela ver o lucro enquanto digita. */
   function margemProduto(){
@@ -2212,7 +2212,8 @@ function telaEstoque(){
   const ps = d.produtos.slice().sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
   if (!ps.length) {
     return barraDemo() + '<div class="empty"><strong>Nenhum perfume cadastrado</strong>' +
-      'Cadastre uma compra e o estoque se monta sozinho.</div>';
+      'Registre a compra no distribuidor: os perfumes, o custo e o estoque ' +
+      'se montam sozinhos a partir dela.</div>';
   }
   const valorEstoque = r2(ps.reduce((s,p) => s + Math.max(0, estoqueDe(p.id)) * custoMedio(p.id), 0));
   const potencial   = r2(ps.reduce((s,p) => s + Math.max(0, estoqueDe(p.id)) * (Number(p.preco)||0), 0));
@@ -2723,7 +2724,8 @@ const TELAS = {
 const FABS = {
   vendas:   { rot:"Nova venda",   fn:() => formVenda(null) },
   compras:  { rot:"Nova compra",  fn:() => formCompra(null) },
-  estoque:  { rot:"Novo perfume", fn:() => formProduto(null) },
+  /* O perfume nasce da compra. Olhando o estoque, o que ela quer e repor. */
+  estoque:  { rot:"Nova compra",  fn:() => formCompra(null) },
   clientes: { rot:"Novo cliente", fn:() => formCliente(null) },
   resumo:   { rot:"Nova venda",   fn:() => formVenda(null) }
 };
