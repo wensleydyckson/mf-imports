@@ -314,6 +314,8 @@ a.btn{text-decoration:none}
 .req{margin-left:6px;font-size:9.5px;font-weight:700;letter-spacing:.08em;
   text-transform:uppercase;color:var(--gold)}
 input.erro{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.note.urgente{background:var(--bad-soft);border-color:rgba(228,112,124,.34);align-items:center}
+.note .btn{flex:0 0 auto}
 .money-in{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;background:var(--surface-2);border-radius:11px;padding:3px;border:1px solid var(--line)}
@@ -540,6 +542,21 @@ const ICON = {
 
 const COLS = ["produtos","clientes","fornecedores","compras","vendas"];
 const LS_KEY = "mf_imports_v1";
+const SNAP_KEY = "mf_imports_snap";   /* como estava no inicio do dia */
+const CFG_KEY = "mf_imports_cfg";     /* preferencias do aparelho, nao sincroniza */
+
+const cfg = { ultimoBackup: null };
+function lerCfg(){
+  try {
+    const o = JSON.parse(localStorage.getItem(CFG_KEY) || "null");
+    if (o && typeof o === "object") Object.assign(cfg, o);
+  } catch (e) {}
+}
+function gravarCfg(){
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
+}
+function marcarBackup(){ cfg.ultimoBackup = hoje(); gravarCfg(); render(); }
+function diasSemBackup(){ return cfg.ultimoBackup ? -diasAte(cfg.ultimoBackup) : null; }
 
 const S = { produtos:[], clientes:[], fornecedores:[], compras:[], vendas:[] };
 
@@ -555,7 +572,22 @@ function lerLocal(){
     COLS.forEach(c => { if (Array.isArray(o[c])) S[c] = o[c]; });
   } catch (e) { /* aparelho sem storage: segue em memória */ }
 }
-function gravarLocal(){
+function gravarLocal(semCopia){
+  /* Antes da primeira gravacao do dia, guarda como tudo estava. E o que permite
+     desfazer uma importacao errada ou uma exclusao sem querer. */
+  if (!semCopia) {
+    try {
+      const atual = localStorage.getItem(LS_KEY);
+      let snap = null;
+      try { snap = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); } catch (e) {}
+      if (atual && (!snap || snap.data !== hoje())) {
+        localStorage.setItem(SNAP_KEY, JSON.stringify({ data: hoje(), dados: JSON.parse(atual) }));
+      }
+    } catch (e) {
+      /* sem espaco para a copia: descarta a copia, nunca o dado principal */
+      try { localStorage.removeItem(SNAP_KEY); } catch (e2) {}
+    }
+  }
   try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
 }
 
@@ -1707,10 +1739,23 @@ function grafico(){
   '</div>';
 }
 
+/* O app cobra o backup: os dados moram so neste aparelho. */
+function avisoBackup(){
+  if (emDemo() || !temDadosReais()) return "";
+  const d = diasSemBackup();
+  if (d !== null && d < 30) return "";
+  const txt = d === null
+    ? "Você ainda não guardou nenhuma cópia dos seus dados."
+    : "Faz " + d + " dias desde o último backup.";
+  return '<div class="note urgente"><span class="grow">' + txt +
+    ' Se perder o celular, perde tudo.</span>' +
+    '<button class="btn btn-sm" data-goto="backup">Fazer agora</button></div>';
+}
+
 function telaResumo(){
   const r = resumo();
   const venc = r.vencidas.length;
-  return barraDemo() +
+  return barraDemo() + avisoBackup() +
     '<div class="stack">' +
       '<div class="hero">' +
         '<div class="eyebrow">A receber</div>' +
@@ -2127,22 +2172,59 @@ function telaClientes(){
 }
 
 function telaBackup(){
+  const dias = diasSemBackup();
+  const nunca = dias === null;
+  const cor = (nunca || dias >= 30) ? "b-bad" : dias >= 15 ? "b-warn" : "b-good";
+  const rotulo = nunca ? "nunca" : dias === 0 ? "hoje" : dias === 1 ? "ontem" : "há " + dias + " dias";
+  const podeEnviar = !!(navigator.canShare && window.File);
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); } catch (e) {}
+
   return '<div class="stack">' +
-    '<div class="note"><span>Um backup é um arquivo com <b>tudo</b> que está cadastrado. Guarde no e-mail ou no seu drive de tempos em tempos.</span></div>' +
     '<div class="card" style="padding:14px">' +
-      '<div class="eyebrow">Exportar</div>' +
+      '<div class="spread"><span class="eyebrow">Último backup</span>' +
+        '<span class="badge ' + cor + '">' + rotulo + '</span></div>' +
+      '<p class="faint" style="margin:9px 0 12px;line-height:1.5">' +
+        (nunca
+          ? "Você ainda não guardou nenhuma cópia. Os dados existem só neste aparelho: se ele sumir, some tudo junto."
+          : "Guardado em " + fmtData(cfg.ultimoBackup) + ". Vale repetir uma vez por mês.") +
+      '</p>' +
+      '<button class="btn btn-primary btn-block" data-enviar="1">' +
+        (podeEnviar ? "Enviar backup agora" : "Baixar backup agora") + '</button>' +
+      (podeEnviar
+        ? '<p class="faint" style="margin:9px 0 0;font-size:12px;line-height:1.45">' +
+          'Abre a folha de compartilhamento do iPhone: dá para mandar no WhatsApp, ' +
+          'por e-mail ou salvar nos Arquivos.</p>'
+        : "") +
+    '</div>' +
+
+    '<div class="card" style="padding:14px">' +
+      '<div class="eyebrow">Planilhas</div>' +
       '<div class="stack-sm" style="margin-top:11px">' +
-        '<button class="btn btn-block" data-exp="csv">Planilha de vendas (CSV)</button>' +
-        '<button class="btn btn-block" data-exp="csvp">Planilha de parcelas (CSV)</button>' +
-        '<button class="btn btn-block btn-primary" data-exp="json">Backup completo (JSON)</button>' +
+        '<button class="btn btn-block" data-exp="csv">Vendas (CSV)</button>' +
+        '<button class="btn btn-block" data-exp="csvp">Parcelas (CSV)</button>' +
+        '<button class="btn btn-block" data-exp="json">Backup completo (JSON)</button>' +
       '</div>' +
     '</div>' +
+
+    (snap && snap.dados
+      ? '<div class="card" style="padding:14px">' +
+          '<div class="eyebrow">Cópia guardada no aparelho</div>' +
+          '<p class="faint" style="margin:8px 0 10px;line-height:1.5">O app guarda sozinho como tudo ' +
+            'estava no início do dia ' + fmtData(snap.data) + '. Serve para desfazer uma importação ' +
+            'errada ou algo apagado sem querer. Não substitui o backup: sai junto se o celular sumir.</p>' +
+          '<button class="btn btn-block" data-restaurar-snap="1">Voltar para essa cópia</button>' +
+        '</div>'
+      : "") +
+
     '<div class="card" style="padding:14px">' +
       '<div class="eyebrow">Restaurar backup</div>' +
-      '<p class="faint" style="margin:8px 0 10px;line-height:1.5">Cole aqui o conteúdo de um arquivo de backup. Isso <b>substitui</b> tudo que está cadastrado agora.</p>' +
+      '<p class="faint" style="margin:8px 0 10px;line-height:1.5">Cole aqui o conteúdo de um arquivo de ' +
+        'backup. Isso <b>substitui</b> tudo que está cadastrado agora.</p>' +
       '<textarea id="impTxt" placeholder="Cole o backup aqui" style="min-height:110px;font-size:13px"></textarea>' +
       '<button class="btn btn-block" style="margin-top:10px" data-imp="1">Restaurar</button>' +
     '</div>' +
+
     '<div class="card" style="padding:14px">' +
       '<div class="eyebrow">Zona de risco</div>' +
       '<p class="faint" style="margin:8px 0 10px">Apaga todos os cadastros deste caderno.</p>' +
@@ -2230,6 +2312,7 @@ async function exportar(tipo){
     document.body.appendChild(a);
     a.click();
     setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 5000);
+    if (tipo === "json") marcarBackup();
     toast("Arquivo gerado. Procure em Downloads / Arquivos.");
   } catch (e) {
     mostrarTexto(nome, conteudo);
@@ -2243,6 +2326,39 @@ function mostrarTexto(nome, conteudo){
     '<button class="btn btn-primary btn-block" data-copiar="1">Copiar tudo</button>');
   sheetSalvar = null;
   $("#sheetBody").querySelector("textarea").addEventListener("focus", e => e.target.select());
+}
+
+/* Um toque: monta o arquivo e abre a folha de compartilhamento do iPhone,
+   de onde ela manda no WhatsApp, por e-mail ou salva nos Arquivos. */
+function enviarBackup(){
+  const nome = "mf-imports-backup-" + hoje() + ".json";
+  const conteudo = JSON.stringify({ versao:1, exportadoEm:new Date().toISOString(), dados:S }, null, 2);
+  let arquivo = null;
+  try { arquivo = new File([conteudo], nome, { type:"application/json" }); } catch (e) {}
+
+  if (arquivo && navigator.canShare && navigator.canShare({ files:[arquivo] })) {
+    navigator.share({ files:[arquivo], title:"Backup MF Imports" })
+      .then(() => { marcarBackup(); toast("Backup enviado."); })
+      .catch(e => {
+        if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+        exportar("json");
+      });
+    return;
+  }
+  exportar("json");
+}
+
+function restaurarSnapshot(){
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); } catch (e) {}
+  if (!snap || !snap.dados) { toast("Não há cópia guardada."); return; }
+  if (!confirm("Voltar para como estava no início do dia " + fmtData(snap.data) +
+    "? Tudo que você cadastrou depois disso se perde.")) return;
+  COLS.forEach(c => { S[c] = Array.isArray(snap.dados[c]) ? snap.dados[c] : []; });
+  gravarLocal(true);
+  if (dbRef) COLS.forEach(c => S[c].forEach(o => dbRef.collection(c).doc(o.id).set(o).catch(erroDb)));
+  render();
+  toast("Cópia do dia " + fmtData(snap.data) + " restaurada.");
 }
 
 function importar(){
@@ -2377,6 +2493,8 @@ document.addEventListener("click", e => {
   const exp = t.closest("[data-exp]");
   if (exp) { exportar(exp.dataset.exp); return; }
 
+  if (t.closest("[data-enviar]")) { enviarBackup(); return; }
+  if (t.closest("[data-restaurar-snap]")) { restaurarSnapshot(); return; }
   if (t.closest("[data-imp]")) { importar(); return; }
   if (t.closest("[data-zerar]")) { zerarTudo(); return; }
 
@@ -2406,6 +2524,7 @@ document.addEventListener("keydown", e => {
 
 /* ---------- start ---------- */
 lerLocal();
+lerCfg();
 numerarVendasAntigas();
 render();
 if (window.claude && typeof window.claude.use === "function") iniciarNuvem();

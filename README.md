@@ -100,8 +100,20 @@ sem internet.
 
 ## Backup
 
-Como os dados moram só no aparelho, **backup não é opcional**. Dentro do app:
-**Mais → Backup e exportação**.
+Como os dados moram só no aparelho, **backup não é opcional**. O app ajuda de
+três formas, em **Mais → Backup e exportação**:
+
+- **Enviar backup agora** — um toque abre a folha de compartilhamento do iPhone.
+  Dá para mandar no WhatsApp, por e-mail ou salvar nos Arquivos / iCloud Drive.
+  É o caminho mais rápido: mande para si mesmo uma vez por mês.
+- **Lembrete automático** — passados 30 dias sem backup, aparece um aviso
+  vermelho na tela de Resumo até ela fazer.
+- **Cópia do início do dia** — o app guarda sozinho como tudo estava antes da
+  primeira alteração de cada dia. Desfaz uma importação errada ou algo apagado
+  sem querer. Não substitui o backup: essa cópia mora no mesmo aparelho e some
+  junto com ele.
+
+E as exportações de sempre:
 
 | Arquivo | Serve para |
 |---|---|
