@@ -379,9 +379,12 @@ input.erro{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
 .kv .v{font-weight:600;text-align:right}
 
 .demo-bar{
-  display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;
-  background:var(--surface-2);border:1px dashed var(--line-2);font-size:12.5px;color:var(--ink-2);
+  display:flex;align-items:center;gap:11px;padding:12px;border-radius:12px;
+  background:var(--gold-soft);border:1px solid rgba(216,174,88,.45);
+  font-size:12.5px;color:var(--ink-2);line-height:1.45;
 }
+.demo-bar b{color:var(--gold)}
+.demo-bar .btn{flex:0 0 auto}
 
 @media (prefers-reduced-motion: reduce){
   *{animation:none!important;transition:none!important}
@@ -570,7 +573,19 @@ const LS_KEY = "mf_imports_v1";
 const SNAP_KEY = "mf_imports_snap";   /* como estava no inicio do dia */
 const CFG_KEY = "mf_imports_cfg";     /* preferencias do aparelho, nao sincroniza */
 
-const cfg = { ultimoBackup: null };
+const cfg = { ultimoBackup: null, semExemplos: false };
+
+/* Safari em aba privada, ou com dados de site bloqueados, aceita a escrita e
+   devolve vazio na leitura. Sem esse teste o app perdia tudo em silencio. */
+let storageOk = true;
+function testarStorage(){
+  try {
+    const k = "__mf_teste__";
+    localStorage.setItem(k, "ok");
+    storageOk = localStorage.getItem(k) === "ok";
+    localStorage.removeItem(k);
+  } catch (e) { storageOk = false; }
+}
 function lerCfg(){
   try {
     const o = JSON.parse(localStorage.getItem(CFG_KEY) || "null");
@@ -724,11 +739,19 @@ function exemplos(){
 
 let DEMO = null;
 function D(){
-  if (temDadosReais()) return S;
+  if (temDadosReais() || cfg.semExemplos) return S;
   if (!DEMO) DEMO = exemplos();
   return DEMO;
 }
-const emDemo = () => !temDadosReais();
+const emDemo = () => !temDadosReais() && !cfg.semExemplos;
+
+function esconderExemplos(){
+  cfg.semExemplos = true;
+  gravarCfg();
+  DEMO = null;
+  render();
+  toast("Exemplos escondidos. O caderno está vazio.");
+}
 
 /* =======================================================================
    4. CÁLCULOS
@@ -1754,9 +1777,22 @@ function histCliente(id){
    9. TELAS
    ======================================================================= */
 
+/* Vai no topo de quase toda tela: primeiro o alerta de armazenamento, que e
+   grave, depois o aviso de que a tela mostra demonstracao. */
 function barraDemo(){
-  if (!emDemo()) return "";
-  return '<div class="demo-bar"><span class="grow">Estes números são <b>exemplos</b>, só para você ver como funciona. Somem sozinhos no seu primeiro cadastro.</span></div>';
+  let h = "";
+  if (!storageOk) {
+    h += '<div class="note urgente"><span class="grow"><b>Este navegador não está guardando nada.</b> ' +
+      'Tudo que você cadastrar some ao fechar o app. Se estiver numa aba anônima do Safari, ' +
+      'saia dela e abra o link normalmente.</span></div>';
+  }
+  if (emDemo()) {
+    h += '<div class="demo-bar"><span class="grow"><b>Isto é uma demonstração.</b> ' +
+      'Nada nesta tela é seu: são dados de exemplo para você ver como o app funciona. ' +
+      'Sua primeira venda faz eles sumirem.</span>' +
+      '<button class="btn btn-sm" data-sem-exemplos="1">Começar do zero</button></div>';
+  }
+  return h;
 }
 
 function grafico(){
@@ -2034,7 +2070,11 @@ function telaMais(){
     '</div>' +
     '<div class="card" style="padding:14px">' +
       '<div class="spread"><span class="eyebrow">Onde os dados ficam</span>' +
-        '<span class="badge ' + (nuvem ? "b-good" : "b-warn") + '">' + (nuvem ? "Nuvem" : "Neste aparelho") + '</span></div>' +
+        '<span class="badge ' + (!storageOk ? "b-bad" : nuvem ? "b-good" : "b-warn") + '">' +
+        (!storageOk ? "não está salvando" : nuvem ? "Nuvem" : "Neste aparelho") + '</span></div>' +
+      '<div class="kv" style="margin-top:8px"><span class="k">Cadastrado por você</span>' +
+        '<span class="v mono">' + S.vendas.length + ' vendas &middot; ' + S.compras.length +
+        ' compras &middot; ' + S.clientes.length + ' clientes</span></div>' +
       '<p class="faint" style="margin:9px 0 0;line-height:1.5">' +
         (nuvem
           ? "Tudo é salvo na nuvem e aparece em qualquer aparelho onde você abrir este link com a mesma conta. Uma cópia fica guardada no aparelho para funcionar sem internet."
@@ -2434,6 +2474,13 @@ async function importar(){
 }
 
 async function zerarTudo(){
+  if (emDemo()) {
+    const ok = await perguntar("Não há nada seu para apagar",
+      "O que aparece nas telas são dados de exemplo, não cadastros seus. " +
+      "Quer escondê-los e ficar com o caderno vazio?", "Esconder exemplos");
+    if (ok) esconderExemplos();
+    return;
+  }
   const partes = [];
   if (S.vendas.length)   partes.push(S.vendas.length + (S.vendas.length === 1 ? " venda" : " vendas"));
   if (S.compras.length)  partes.push(S.compras.length + (S.compras.length === 1 ? " compra" : " compras"));
@@ -2580,6 +2627,7 @@ document.addEventListener("click", async e => {
   const exp = t.closest("[data-exp]");
   if (exp) { exportar(exp.dataset.exp); return; }
 
+  if (t.closest("[data-sem-exemplos]")) { esconderExemplos(); return; }
   if (t.closest("[data-enviar]")) { enviarBackup(); return; }
   if (t.closest("[data-restaurar-snap]")) { restaurarSnapshot(); return; }
   if (t.closest("[data-imp]")) { importar(); return; }
@@ -2612,6 +2660,7 @@ document.addEventListener("keydown", e => {
 });
 
 /* ---------- start ---------- */
+testarStorage();
 lerLocal();
 lerCfg();
 numerarVendasAntigas();
