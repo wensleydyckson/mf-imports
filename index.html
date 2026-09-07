@@ -311,6 +311,9 @@ a.btn{text-decoration:none}
 .ficha-nums b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
 .ficha-nums .dev{color:var(--bad);font-weight:700}
 .tel{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.req{margin-left:6px;font-size:9.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--gold)}
+input.erro{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
 .money-in{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;background:var(--surface-2);border-radius:11px;padding:3px;border:1px solid var(--line)}
@@ -1113,12 +1116,12 @@ function formVenda(venda){
   const corpo =
     '<div class="field-2">' +
       '<div class="field"><label>Data da venda</label><input type="date" data-f="data" value="' + esc(rascunho.data) + '"></div>' +
-      '<div class="field"><label>Celular do cliente</label>' +
+      '<div class="field"><label>Celular <span class="req">obrigatório</span></label>' +
         '<input type="tel" inputmode="numeric" data-f="clienteTel" placeholder="(11) 98888-7777" value="' + esc(rascunho.clienteTel) + '"></div>' +
     '</div>' +
     '<div class="field"><label>Nome</label>' +
       '<input type="text" data-f="clienteNome" list="dl-clientes" placeholder="Como voc\u00ea chama a pessoa" value="' + esc(rascunho.clienteNome) + '" autocomplete="off">' +
-      '<span class="hint">\u00c9 o celular que identifica o cliente, n\u00e3o o nome. Sem CPF.</span></div>' +
+      '<span class="hint">O celular é obrigatório, com DDD: é ele que identifica a pessoa e junta as compras dela. Nome pode repetir. Sem CPF.</span></div>' +
     '<div id="fichaCli"></div>' +
     '<div class="sec"><div class="sec-head"><span class="eyebrow">Perfumes</span>' +
       '<button class="btn-ghost btn-sm" data-add="1">+ Adicionar</button></div>' +
@@ -1220,6 +1223,7 @@ function ligarForm(tipo){
 
   body.addEventListener("input", e => {
     if (!e.target.matches("[data-f]")) return;
+    e.target.classList.remove("erro");
     lerCampos();
     atualizarTotais();
   });
@@ -1304,6 +1308,20 @@ function salvarVenda(){
     if (linha) rascunho.itens[Number(linha.dataset.i)][el.dataset.f] = el.value;
     else rascunho[el.dataset.f] = el.value;
   });
+
+  /* Sem celular a venda fica órfã: não entra no histórico de ninguém, não dá
+     para cobrar nem mandar a OC. É o único campo que barra o salvamento. */
+  const tel = normTel(rascunho.clienteTel);
+  if (tel.length < 10) {
+    toast(tel ? "Celular incompleto — falta o DDD." : "Informe o celular do cliente.");
+    const campo = body.querySelector('[data-f="clienteTel"]');
+    if (campo) {
+      campo.classList.add("erro");
+      campo.focus();
+      campo.scrollIntoView({ block:"center", behavior:"smooth" });
+    }
+    return;
+  }
 
   const itens = rascunho.itens
     .filter(it => String(it.nome).trim() && parseMoney(it.qtd) > 0)
@@ -1585,7 +1603,12 @@ function formCliente(cli){
   sheetSalvar = () => {
     const tel = normTel($("#cTel").value);
     const nome = $("#cNome").value.trim();
-    if (!tel && !nome) { toast("Informe pelo menos o celular."); return; }
+    if (tel.length < 10) {
+      toast(tel ? "Celular incompleto — falta o DDD." : "Informe o celular, com DDD.");
+      const campo = $("#cTel");
+      if (campo) { campo.classList.add("erro"); campo.focus(); }
+      return;
+    }
     if (tel) {
       const outro = clientePorTel(tel);
       if (outro && outro.id !== c.id) { toast("Esse celular j\u00e1 e\u0301 de " + outro.nome + "."); return; }
@@ -2139,7 +2162,7 @@ function telaAjuda(){
       passo(4, "Dê o nome <b>MF Imports</b> e toque em <b>Adicionar</b>.") +
     '</div></div>' +
     '<div class="sec"><span class="eyebrow">Boas práticas</span><div class="list">' +
-      passo("•", "Sempre peça o <b>celular</b>. É ele que junta todas as compras da pessoa — nome se repete e se escreve de vários jeitos, número não. Ninguém precisa dar CPF.") +
+      passo("•", "O <b>celular é obrigatório</b> na venda, com DDD. É ele que junta todas as compras da pessoa — nome se repete e se escreve de vários jeitos, número não. Ninguém precisa dar CPF.") +
       passo("•", "Cada venda vira uma <b>Ordem de Compra</b> numerada. Dá para mandar a OC no WhatsApp do cliente: ele fica com o comprovante e você com o histórico.") +
       passo("•", "Lance a venda na hora, ainda com a cliente na frente — leva menos de um minuto.") +
       passo("•", "Registre a compra no distribuidor assim que ela chegar: é isso que alimenta o estoque e o custo.") +
