@@ -315,6 +315,20 @@ a.btn{text-decoration:none}
   text-transform:uppercase;color:var(--gold)}
 input.erro{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
 .note.urgente{background:var(--bad-soft);border-color:rgba(228,112,124,.34);align-items:center}
+
+/* Confirmacao propria: o confirm() do navegador nao aparece em app instalado. */
+.dlg{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:22px;
+  background:rgba(6,5,4,.66);opacity:0;pointer-events:none;transition:opacity .18s}
+.dlg.open{opacity:1;pointer-events:auto}
+.dlg-caixa{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--line-2);
+  border-radius:16px;padding:18px;box-shadow:var(--shadow-2);
+  transform:scale(.96);transition:transform .18s}
+.dlg.open .dlg-caixa{transform:scale(1)}
+.dlg-titulo{font-family:"Bodoni Moda",Didot,Georgia,serif;font-size:19px;margin-bottom:8px}
+.dlg-texto{margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--ink-2)}
+.dlg-botoes{display:flex;gap:9px}
+.dlg-botoes .btn{flex:1}
+.dlg-botoes .btn-danger{background:var(--bad-soft);border-color:rgba(228,112,124,.42)}
 .note .btn{flex:0 0 auto}
 .money-in{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
@@ -400,6 +414,17 @@ input.erro{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
     </div>
     <div class="sheet-body" id="sheetBody"></div>
     <div class="sheet-foot" id="sheetFoot"></div>
+  </div>
+</div>
+
+<div class="dlg" id="dialogo" role="alertdialog" aria-modal="true" aria-labelledby="dlgTitulo">
+  <div class="dlg-caixa">
+    <div class="dlg-titulo" id="dlgTitulo"></div>
+    <p class="dlg-texto" id="dlgTexto"></p>
+    <div class="dlg-botoes">
+      <button class="btn" id="dlgCancelar">Cancelar</button>
+      <button class="btn btn-danger" id="dlgOk"></button>
+    </div>
   </div>
 </div>
 
@@ -922,6 +947,34 @@ function renderTabs(){
    ======================================================================= */
 
 let sheetSalvar = null;
+
+/* Pergunta de sim ou nao desenhada na pagina. Devolve uma promessa porque o
+   confirm() nativo nao e confiavel em app instalado na tela de inicio do iPhone:
+   ele simplesmente nao aparece, e todo botao de excluir virava um toque morto. */
+let resolverDialogo = null;
+function perguntar(titulo, texto, rotuloOk){
+  return new Promise(resolve => {
+    if (resolverDialogo) { const r = resolverDialogo; resolverDialogo = null; r(false); }
+    resolverDialogo = resolve;
+    $("#dlgTitulo").textContent = titulo;
+    $("#dlgTexto").textContent = texto;
+    $("#dlgOk").textContent = rotuloOk || "Confirmar";
+    $("#dialogo").classList.add("open");
+    $("#dlgOk").focus();
+  });
+}
+function responderDialogo(valor){
+  if (!$("#dialogo").classList.contains("open")) return;
+  $("#dialogo").classList.remove("open");
+  const r = resolverDialogo;
+  resolverDialogo = null;
+  if (r) r(valor);
+}
+$("#dlgOk").addEventListener("click", () => responderDialogo(true));
+$("#dlgCancelar").addEventListener("click", () => responderDialogo(false));
+$("#dialogo").addEventListener("click", e => {
+  if (e.target === $("#dialogo")) responderDialogo(false);
+});
 
 function abrirSheet(titulo, corpoHTML, botoes){
   $("#sheetTitle").textContent = titulo;
@@ -2348,12 +2401,14 @@ function enviarBackup(){
   exportar("json");
 }
 
-function restaurarSnapshot(){
+async function restaurarSnapshot(){
   let snap = null;
   try { snap = JSON.parse(localStorage.getItem(SNAP_KEY) || "null"); } catch (e) {}
   if (!snap || !snap.dados) { toast("Não há cópia guardada."); return; }
-  if (!confirm("Voltar para como estava no início do dia " + fmtData(snap.data) +
-    "? Tudo que você cadastrou depois disso se perde.")) return;
+  const ok = await perguntar("Voltar para a cópia?",
+    "Tudo volta a como estava no início do dia " + fmtData(snap.data) +
+    ". O que você cadastrou depois disso se perde.", "Voltar");
+  if (!ok) return;
   COLS.forEach(c => { S[c] = Array.isArray(snap.dados[c]) ? snap.dados[c] : []; });
   gravarLocal(true);
   if (dbRef) COLS.forEach(c => S[c].forEach(o => dbRef.collection(c).doc(o.id).set(o).catch(erroDb)));
@@ -2361,14 +2416,16 @@ function restaurarSnapshot(){
   toast("Cópia do dia " + fmtData(snap.data) + " restaurada.");
 }
 
-function importar(){
+async function importar(){
   const txt = $("#impTxt").value.trim();
   if (!txt) { toast("Cole o conteúdo do backup."); return; }
   let o;
   try { o = JSON.parse(txt); } catch (e) { toast("Esse texto não é um backup válido."); return; }
   const dados = o && o.dados ? o.dados : o;
   if (!dados || !Array.isArray(dados.vendas)) { toast("Esse backup não tem o formato esperado."); return; }
-  if (!confirm("Restaurar o backup? Tudo que está cadastrado agora será substituído.")) return;
+  const ok = await perguntar("Restaurar backup?",
+    "Tudo que está cadastrado agora será substituído pelo conteúdo desse backup.", "Restaurar");
+  if (!ok) return;
   COLS.forEach(c => { S[c] = Array.isArray(dados[c]) ? dados[c] : []; });
   gravarLocal();
   if (dbRef) COLS.forEach(c => S[c].forEach(o2 => dbRef.collection(c).doc(o2.id).set(o2).catch(erroDb)));
@@ -2376,9 +2433,18 @@ function importar(){
   toast("Backup restaurado.");
 }
 
-function zerarTudo(){
-  if (!confirm("Apagar TODOS os cadastros? Isso não tem volta. Faça um backup antes.")) return;
-  if (!confirm("Tem certeza mesmo?")) return;
+async function zerarTudo(){
+  const partes = [];
+  if (S.vendas.length)   partes.push(S.vendas.length + (S.vendas.length === 1 ? " venda" : " vendas"));
+  if (S.compras.length)  partes.push(S.compras.length + (S.compras.length === 1 ? " compra" : " compras"));
+  if (S.clientes.length) partes.push(S.clientes.length + (S.clientes.length === 1 ? " cliente" : " clientes"));
+  if (S.produtos.length) partes.push(S.produtos.length + (S.produtos.length === 1 ? " perfume" : " perfumes"));
+  if (!partes.length) { toast("Não há nada cadastrado."); return; }
+  const ok = await perguntar("Apagar tudo?",
+    "Isso apaga " + partes.join(", ").replace(/, ([^,]*)$/, " e $1") +
+    " deste caderno. Não tem volta — se quiser guardar antes, cancele e faça um backup.",
+    "Apagar tudo");
+  if (!ok) return;
   COLS.forEach(c => {
     if (dbRef) S[c].forEach(o => dbRef.collection(c).doc(o.id).delete().catch(function(){}));
     S[c] = [];
@@ -2422,7 +2488,7 @@ $("#fab").addEventListener("click", () => {
   if (cfg) cfg.fn();
 });
 
-document.addEventListener("click", e => {
+document.addEventListener("click", async e => {
   const t = e.target;
 
   const tab = t.closest("[data-tab]");
@@ -2473,16 +2539,37 @@ document.addEventListener("click", e => {
   if (salvarBtn) { if (sheetSalvar) sheetSalvar(); return; }
 
   const apV = t.closest("[data-apagar-venda]");
-  if (apV) { if (confirm("Excluir esta venda?")) { apagar("vendas", apV.dataset.apagarVenda); fecharSheet(); toast("Venda excluída."); } return; }
+  if (apV) {
+    const v = D().vendas.find(x => x.id === apV.dataset.apagarVenda);
+    if (await perguntar("Excluir a venda?",
+      "A ordem de compra " + ((v && v.oc) || "") + " sai do histórico do cliente e das contas a receber.",
+      "Excluir")) { apagar("vendas", apV.dataset.apagarVenda); fecharSheet(); toast("Venda excluída."); }
+    return;
+  }
 
   const apC = t.closest("[data-apagar-compra]");
-  if (apC) { if (confirm("Excluir esta compra?")) { apagar("compras", apC.dataset.apagarCompra); fecharSheet(); toast("Compra excluída."); } return; }
+  if (apC) {
+    if (await perguntar("Excluir a compra?",
+      "As unidades dessa compra saem do estoque e as parcelas saem das contas a pagar.",
+      "Excluir")) { apagar("compras", apC.dataset.apagarCompra); fecharSheet(); toast("Compra excluída."); }
+    return;
+  }
 
   const apP = t.closest("[data-apagar-produto]");
-  if (apP) { if (confirm("Excluir este perfume? O histórico de vendas continua.")) { apagar("produtos", apP.dataset.apagarProduto); fecharSheet(); } return; }
+  if (apP) {
+    if (await perguntar("Excluir o perfume?",
+      "As vendas e compras já registradas continuam no histórico.",
+      "Excluir")) { apagar("produtos", apP.dataset.apagarProduto); fecharSheet(); toast("Perfume excluído."); }
+    return;
+  }
 
   const apCl = t.closest("[data-apagar-cliente]");
-  if (apCl) { if (confirm("Excluir este cliente? As vendas continuam registradas.")) { apagar("clientes", apCl.dataset.apagarCliente); fecharSheet(); } return; }
+  if (apCl) {
+    if (await perguntar("Excluir o cliente?",
+      "As vendas dele continuam registradas, mas deixam de ficar agrupadas por esse celular.",
+      "Excluir")) { apagar("clientes", apCl.dataset.apagarCliente); fecharSheet(); toast("Cliente excluído."); }
+    return;
+  }
 
   const edV = t.closest("[data-editar-venda]");
   if (edV) { formVenda(S.vendas.find(x => x.id === edV.dataset.editarVenda)); return; }
@@ -2519,7 +2606,9 @@ document.addEventListener("input", e => {
 });
 
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && $("#sheet").classList.contains("open")) fecharSheet();
+  if (e.key !== "Escape") return;
+  if ($("#dialogo").classList.contains("open")) { responderDialogo(false); return; }
+  if ($("#sheet").classList.contains("open")) fecharSheet();
 });
 
 /* ---------- start ---------- */
