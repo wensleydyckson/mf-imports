@@ -301,6 +301,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
   color:var(--ink);font-weight:600;font-size:12.5px}
 .hist-grupo .list{border-radius:0 0 var(--r) var(--r)}
 .mrk.compra{background:var(--gold-soft);color:var(--gold)}
+
+a.btn{text-decoration:none}
+.oc{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
+  letter-spacing:.04em;color:var(--gold)}
+.ficha{display:flex;flex-direction:column;gap:6px;padding:11px 12px;border-radius:11px;
+  background:var(--accent-soft);border:1px solid var(--accent-line)}
+.ficha-nums{display:flex;flex-wrap:wrap;gap:3px 14px;font-size:12px;color:var(--ink-2)}
+.ficha-nums b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
+.ficha-nums .dev{color:var(--bad);font-weight:700}
+.tel{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 .money-in{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;background:var(--surface-2);border-radius:11px;padding:3px;border:1px solid var(--line)}
@@ -483,8 +493,22 @@ function gerarParcelas(total, n, primeiraData){
 }
 
 function soDigitos(s){ return String(s || "").replace(/\D/g,""); }
+
+/* O celular e a identidade do cliente: ninguem aqui quer informar CPF.
+   Guardamos so os digitos, sem o 55, para o mesmo numero nunca virar duas fichas. */
+function normTel(t){
+  let d = soDigitos(t);
+  if (d.length > 11 && d.slice(0,2) === "55") d = d.slice(2);
+  return d.slice(-11);
+}
+function fmtTel(t){
+  const d = normTel(t);
+  if (d.length === 11) return "(" + d.slice(0,2) + ") " + d.slice(2,7) + "-" + d.slice(7);
+  if (d.length === 10) return "(" + d.slice(0,2) + ") " + d.slice(2,6) + "-" + d.slice(6);
+  return d;
+}
 function linkWhats(tel, texto){
-  let d = soDigitos(tel);
+  let d = normTel(tel);
   if (!d) return null;
   if (d.length === 10 || d.length === 11) d = "55" + d;
   return "https://wa.me/" + d + "?text=" + encodeURIComponent(texto);
@@ -569,6 +593,7 @@ async function iniciarNuvem(){
       }
       S[col] = remoto;
       gravarLocal();
+      if (col === "vendas") numerarVendasAntigas();
       render();
     }, err => {
       if (err && (err.code === "revoked" || err.code === "not_granted" || err.code === "capability_disabled")) {
@@ -593,7 +618,7 @@ function exemplos(){
   const p2 = { id:"ex2", nome:"Khamrah", marca:"Lattafa", ml:100, preco:245 };
   const p3 = { id:"ex3", nome:"Yara", marca:"Lattafa", ml:100, preco:199 };
   const c1 = { id:"exc1", nome:"Amanda Ribeiro", tel:"11988887777", obs:"" };
-  const c2 = { id:"exc2", nome:"Juliana Prado", tel:"", obs:"" };
+  const c2 = { id:"exc2", nome:"Juliana Prado", tel:"11966665555", obs:"" };
   return {
     produtos:[p1,p2,p3],
     clientes:[c1,c2],
@@ -614,7 +639,8 @@ function exemplos(){
     }],
     vendas:[
       {
-        id:"exv1", data:addMeses(hoje(),-1), clienteId:"exc1", clienteNome:"Amanda Ribeiro",
+        id:"exv1", oc:"OC-0001", data:addMeses(hoje(),-1), clienteId:"exc1",
+        clienteNome:"Amanda Ribeiro", clienteTel:"11988887777",
         itens:[{ produtoId:"ex2", nome:"Khamrah", qtd:1, precoUnit:245, custoUnit:158 }],
         desconto:0, taxaPct:0, total:245, forma:"promissoria", obs:"",
         parcelas:[
@@ -623,7 +649,8 @@ function exemplos(){
         ]
       },
       {
-        id:"exv2", data:hoje(), clienteId:"exc2", clienteNome:"Juliana Prado",
+        id:"exv2", oc:"OC-0002", data:hoje(), clienteId:"exc2",
+        clienteNome:"Juliana Prado", clienteTel:"11966665555",
         itens:[
           { produtoId:"ex1", nome:"Asad", qtd:1, precoUnit:189, custoUnit:118 },
           { produtoId:"ex3", nome:"Yara", qtd:1, precoUnit:199, custoUnit:126 }
@@ -717,6 +744,47 @@ function parcelasFlat(tipo){
   return out;
 }
 function buscarCliente(id){ return D().clientes.find(c => c.id === id); }
+function clientePorTel(tel){
+  const d = normTel(tel);
+  return d ? (S.clientes.find(c => normTel(c.tel) === d) || null) : null;
+}
+
+/* Cada venda vira uma Ordem de Compra numerada, para ela e o cliente poderem
+   se referir a mesma compra depois. O numero sai do maior ja usado. */
+function proximaOC(){
+  let maior = 0;
+  S.vendas.forEach(v => {
+    const m = /^OC-(\d+)$/.exec(v.oc || "");
+    if (m) maior = Math.max(maior, parseInt(m[1], 10));
+  });
+  return "OC-" + String(maior + 1).padStart(4, "0");
+}
+/* Vendas anteriores a numeracao ganham OC em ordem de data. Roda uma vez:
+   depois disso todas tem numero e a funcao nao escreve mais nada. */
+function numerarVendasAntigas(){
+  const sem = S.vendas.filter(v => !v.oc);
+  if (!sem.length) return;
+  let maior = 0;
+  S.vendas.forEach(v => {
+    const m = /^OC-(\d+)$/.exec(v.oc || "");
+    if (m) maior = Math.max(maior, parseInt(m[1], 10));
+  });
+  sem.sort((a,b) => a.data.localeCompare(b.data) || a.id.localeCompare(b.id));
+  sem.forEach(v => { maior++; v.oc = "OC-" + String(maior).padStart(4,"0"); salvarSilencioso("vendas", v); });
+}
+
+/* Tudo que essa pessoa ja comprou na loja, agrupado pelo celular dela. */
+function statsCliente(id){
+  const vs = D().vendas.filter(v => v.clienteId === id).sort((a,b) => a.data.localeCompare(b.data));
+  const total = r2(vs.reduce((a,v) => a + totalVenda(v), 0));
+  return {
+    vendas: vs, n: vs.length, total: total,
+    aberto: r2(vs.reduce((a,v) => a + abertoDe(v), 0)),
+    ticket: vs.length ? r2(total / vs.length) : 0,
+    primeira: vs.length ? vs[0].data : null,
+    ultima: vs.length ? vs[vs.length - 1].data : null
+  };
+}
 
 function statusParcela(p){
   if (p.pago) return { cls:"b-good", txt:"Paga" };
@@ -785,6 +853,7 @@ const UI = {
   view:"resumo",
   filtroVendas:"todas",
   buscaVendas:"",
+  buscaClientes:"",
   abaParcelas:"receber",
   filtroParcelas:"abertas",
   filtroHist:"tudo",
@@ -849,6 +918,34 @@ function atualizarDatalists(){
 }
 
 /* Acha ou cria produto/cliente/fornecedor pelo nome digitado. */
+/* O celular manda. So cai no nome quando ela nao informou telefone algum,
+   para nao quebrar o que ja estava cadastrado antes dessa mudanca. */
+function acharOuCriarCliente(tel, nome){
+  const d = normTel(tel);
+  const rot = String(nome || "").trim();
+  let c = d ? clientePorTel(d) : null;
+  if (!c && !d && rot) {
+    c = S.clientes.find(x => x.nome.toLowerCase() === rot.toLowerCase()) || null;
+  }
+  if (c) {
+    let mudou = false;
+    if (d && normTel(c.tel) !== d) { c.tel = d; mudou = true; }
+    /* So completa o nome quando ainda nao havia um de verdade: um apelido
+       digitado as pressas numa venda nao pode apagar o nome ja cadastrado.
+       Para corrigir de fato, ela edita a ficha do cliente. */
+    const semNome = !c.nome || c.nome === fmtTel(c.tel) || c.nome === fmtTel(d);
+    if (rot && semNome && c.nome !== rot) { c.nome = rot; mudou = true; }
+    if (mudou) salvarSilencioso("clientes", c);
+    return c;
+  }
+  if (!d && !rot) return null;
+  const novo = { id: uid(), nome: rot || fmtTel(d), tel: d, obs:"", criadoEm: hoje() };
+  S.clientes.push(novo);
+  gravarLocal();
+  if (dbRef) dbRef.collection("clientes").doc(novo.id).set(novo).catch(erroDb);
+  return novo;
+}
+
 function acharOuCriar(col, nome, extra){
   const alvo = String(nome || "").trim();
   if (!alvo) return null;
@@ -1003,7 +1100,9 @@ function htmlPagamento(tipo){
 
 function formVenda(venda){
   rascunho = venda ? Object.assign(novoRascunhoVenda(venda), {
+    oc: venda.oc || "",
     clienteNome: venda.clienteNome || "",
+    clienteTel: venda.clienteTel || (buscarCliente(venda.clienteId) || {}).tel || "",
     nParc: (venda.parcelas || []).length || 2,
     primeira: (venda.parcelas && venda.parcelas[0]) ? venda.parcelas[0].venc : addMeses(hoje(),1),
     desconto: venda.desconto || "", taxaPct: venda.taxaPct || "",
@@ -1014,11 +1113,13 @@ function formVenda(venda){
   const corpo =
     '<div class="field-2">' +
       '<div class="field"><label>Data da venda</label><input type="date" data-f="data" value="' + esc(rascunho.data) + '"></div>' +
-      '<div class="field"><label>Cliente</label><input type="text" data-f="clienteNome" list="dl-clientes" placeholder="Nome" value="' + esc(rascunho.clienteNome) + '" autocomplete="off"></div>' +
+      '<div class="field"><label>Celular do cliente</label>' +
+        '<input type="tel" inputmode="numeric" data-f="clienteTel" placeholder="(11) 98888-7777" value="' + esc(rascunho.clienteTel) + '"></div>' +
     '</div>' +
-    '<div class="field" id="telWrap" hidden><label>WhatsApp do cliente</label>' +
-      '<input type="tel" inputmode="numeric" data-f="clienteTel" placeholder="(11) 98888-7777" value="' + esc(rascunho.clienteTel) + '">' +
-      '<span class="hint">Só para clientes novos — serve para cobrar direto pelo WhatsApp.</span></div>' +
+    '<div class="field"><label>Nome</label>' +
+      '<input type="text" data-f="clienteNome" list="dl-clientes" placeholder="Como voc\u00ea chama a pessoa" value="' + esc(rascunho.clienteNome) + '" autocomplete="off">' +
+      '<span class="hint">\u00c9 o celular que identifica o cliente, n\u00e3o o nome. Sem CPF.</span></div>' +
+    '<div id="fichaCli"></div>' +
     '<div class="sec"><div class="sec-head"><span class="eyebrow">Perfumes</span>' +
       '<button class="btn-ghost btn-sm" data-add="1">+ Adicionar</button></div>' +
       '<div class="stack-sm" id="itens">' + htmlItens("venda") + '</div></div>' +
@@ -1089,10 +1190,26 @@ function ligarForm(tipo){
       });
     }
     if (tipo === "venda") {
-      const w = $("#telWrap", body);
-      const nome = String(rascunho.clienteNome || "").trim().toLowerCase();
-      const existe = S.clientes.some(c => c.nome.toLowerCase() === nome);
-      if (w) w.hidden = !nome || existe;
+      const ficha = $("#fichaCli", body);
+      const c = clientePorTel(rascunho.clienteTel);
+      if (ficha) {
+        if (c) {
+          const st = statsCliente(c.id);
+          ficha.innerHTML = '<div class="ficha">' +
+            '<span class="badge b-accent">J\u00e1 \u00e9 cliente \u2014 ' + esc(c.nome) + '</span>' +
+            '<div class="ficha-nums">' +
+              '<span>' + st.n + (st.n === 1 ? " compra" : " compras") + '</span>' +
+              '<span><b>' + R$(st.total) + '</b> no total</span>' +
+              (st.aberto > 0 ? '<span class="dev">deve ' + R$(st.aberto) + '</span>'
+                             : '<span>sem pend\u00eancia</span>') +
+            '</div></div>';
+          const campoNome = body.querySelector('[data-f="clienteNome"]');
+          if (campoNome && !campoNome.value.trim()) {
+            campoNome.value = c.nome;
+            rascunho.clienteNome = c.nome;
+          }
+        } else ficha.innerHTML = "";
+      }
     }
   }
   function redesenharPgto(){
@@ -1201,20 +1318,16 @@ function salvarVenda(){
     });
   if (!itens.length) { toast("Adicione pelo menos um perfume."); return; }
 
-  const cliente = String(rascunho.clienteNome).trim()
-    ? acharOuCriar("clientes", rascunho.clienteNome, { tel: soDigitos(rascunho.clienteTel), obs:"" })
-    : null;
-  if (cliente && rascunho.clienteTel && !cliente.tel) {
-    cliente.tel = soDigitos(rascunho.clienteTel);
-    salvarSilencioso("clientes", cliente);
-  }
+  const cliente = acharOuCriarCliente(rascunho.clienteTel, rascunho.clienteNome);
 
   const anterior = rascunho.id ? (S.vendas.find(v => v.id === rascunho.id) || {}).parcelas : null;
   const venda = {
     id: rascunho.id || uid(),
     data: rascunho.data || hoje(),
+    oc: rascunho.oc || proximaOC(),
     clienteId: cliente ? cliente.id : null,
     clienteNome: cliente ? cliente.nome : "Sem cliente",
+    clienteTel: cliente ? cliente.tel : "",
     itens: itens,
     desconto: parseMoney(rascunho.desconto),
     taxaPct: rascunho.forma === "cartao" ? parseMoney(rascunho.taxaPct) : 0,
@@ -1290,7 +1403,9 @@ function detalheVenda(id){
   const cli = buscarCliente(v.clienteId);
   const corpo =
     '<div class="card" style="padding:13px">' +
+      '<div class="kv"><span class="k">Ordem de compra</span><span class="v oc" style="font-size:13px">' + esc(v.oc || "\u2014") + '</span></div>' +
       '<div class="kv"><span class="k">Cliente</span><span class="v">' + esc(v.clienteNome) + '</span></div>' +
+      (cli && cli.tel ? '<div class="kv"><span class="k">Celular</span><span class="v tel">' + fmtTel(cli.tel) + '</span></div>' : "") +
       '<div class="kv"><span class="k">Data</span><span class="v">' + fmtData(v.data) + '</span></div>' +
       '<div class="kv"><span class="k">Pagamento</span><span class="v">' + FORMAS[v.forma].rot +
         (v.parcelas.length > 1 ? " &middot; " + v.parcelas.length + "x" : "") + '</span></div>' +
@@ -1312,14 +1427,19 @@ function detalheVenda(id){
     '<div class="sec"><span class="eyebrow">Parcelas</span><div class="list">' +
       v.parcelas.map((p,i) => linhaParcela(p, i, "vendas", v.id, cli, v.clienteNome, ehDemo)).join("") +
     '</div></div>' +
-    (v.obs ? '<div class="note"><span>' + esc(v.obs) + '</span></div>' : "");
+    (v.obs ? '<div class="note"><span>' + esc(v.obs) + '</span></div>' : "") +
+    (cli && cli.tel
+      ? '<a class="btn btn-block" target="_blank" rel="noopener" href="' +
+        esc(linkWhats(cli.tel, textoOC(v))) + '">Enviar esta OC no WhatsApp</a>'
+      : '<div class="note"><span>Sem celular cadastrado, essa compra n\u00e3o entra no hist\u00f3rico do cliente. ' +
+        'Toque em Editar e informe o n\u00famero.</span></div>');
 
   const foot = ehDemo
     ? '<button class="btn btn-block" data-fechar="1">Fechar</button>'
     : '<button class="btn btn-danger" data-apagar-venda="' + v.id + '">Excluir</button>' +
       '<button class="btn btn-primary btn-block" data-editar-venda="' + v.id + '">Editar</button>';
-  abrirSheet("Venda &middot; " + fmtData(v.data), corpo, foot);
-  $("#sheetTitle").textContent = "Venda de " + fmtData(v.data);
+  abrirSheet("Ordem de compra", corpo, foot);
+  $("#sheetTitle").textContent = v.oc || "Venda de " + fmtData(v.data);
 }
 
 function detalheCompra(id){
@@ -1368,6 +1488,31 @@ function linhaParcela(p, i, col, regId, cliente, quem, ehDemo){
     '<div class="item-r"><div class="item-v">' + R$(p.valor) + '</div>' +
       '<span class="badge ' + st.cls + '" style="margin-top:3px">' + st.txt + '</span></div>' +
     wa + '</div>';
+}
+
+/* A OC em texto, para ela mandar no WhatsApp. E o comprovante que o cliente
+   leva sem precisar dar CPF nenhum. */
+function textoOC(v){
+  const L = [];
+  L.push("*MF IMPORTS* \u2014 Perfumes \u00c1rabes Originais");
+  L.push("Ordem de compra *" + (v.oc || "\u2014") + "*");
+  L.push("Data: " + fmtData(v.data));
+  if (v.clienteNome) L.push("Cliente: " + v.clienteNome);
+  L.push("");
+  v.itens.forEach(it => L.push("\u2022 " + it.qtd + " x " + it.nome + " \u2014 " + R$(it.precoUnit) + " cada"));
+  if (v.desconto) L.push("Desconto: \u2212 " + R$(v.desconto));
+  L.push("*Total: " + R$(totalVenda(v)) + "*");
+  L.push("");
+  if (v.parcelas.length > 1) {
+    L.push("Pagamento: " + FORMAS[v.forma].rot + " em " + v.parcelas.length + "x");
+    v.parcelas.forEach(p => L.push("   " + p.n + "/" + v.parcelas.length + " \u2014 " + R$(p.valor) +
+      " at\u00e9 " + fmtData(p.venc) + (p.pago ? " (pago)" : "")));
+  } else {
+    L.push("Pagamento: " + FORMAS[v.forma].rot);
+  }
+  L.push("");
+  L.push("Obrigada pela prefer\u00eancia!");
+  return L.join("\n");
 }
 
 function msgCobranca(nome, p){
@@ -1425,39 +1570,76 @@ function formProduto(prod){
 }
 
 function formCliente(cli){
-  const c = cli || { id:null, nome:"", tel:"", obs:"" };
+  const c = cli || { id:null, nome:"", tel:"", obs:"", criadoEm:hoje() };
   const corpo =
+    '<div class="field"><label>Celular</label>' +
+      '<input type="tel" inputmode="numeric" id="cTel" value="' + esc(c.tel ? fmtTel(c.tel) : "") + '" placeholder="(11) 98888-7777">' +
+      '<span class="hint">Com DDD. \u00c9 o que identifica a pessoa e junta todas as compras dela.</span></div>' +
     '<div class="field"><label>Nome</label><input type="text" id="cNome" value="' + esc(c.nome) + '"></div>' +
-    '<div class="field"><label>WhatsApp</label><input type="tel" inputmode="numeric" id="cTel" value="' + esc(c.tel||"") + '" placeholder="(11) 98888-7777">' +
-      '<span class="hint">Com DDD. Habilita o botão de cobrança pelo WhatsApp.</span></div>' +
-    '<div class="field"><label>Observações</label><textarea id="cObs" placeholder="Preferências, indicações...">' + esc(c.obs||"") + '</textarea></div>' +
+    '<div class="field"><label>Observa\u00e7\u00f5es</label><textarea id="cObs" placeholder="Prefer\u00eancias, indica\u00e7\u00f5es...">' + esc(c.obs||"") + '</textarea></div>' +
     (c.id ? histCliente(c.id) : "");
   const foot =
     (c.id && !emDemo() ? '<button class="btn btn-danger" data-apagar-cliente="' + c.id + '">Excluir</button>' : "") +
     '<button class="btn btn-primary btn-block" data-salvar-cliente="1">Salvar</button>';
-  abrirSheet(c.id ? "Editar cliente" : "Novo cliente", corpo, foot);
+  abrirSheet(c.id ? "Ficha do cliente" : "Novo cliente", corpo, foot);
   sheetSalvar = () => {
+    const tel = normTel($("#cTel").value);
     const nome = $("#cNome").value.trim();
-    if (!nome) { toast("Informe o nome."); return; }
-    salvar("clientes", { id: c.id || uid(), nome: nome, tel: soDigitos($("#cTel").value), obs: $("#cObs").value.trim() });
+    if (!tel && !nome) { toast("Informe pelo menos o celular."); return; }
+    if (tel) {
+      const outro = clientePorTel(tel);
+      if (outro && outro.id !== c.id) { toast("Esse celular j\u00e1 e\u0301 de " + outro.nome + "."); return; }
+    }
+    salvar("clientes", {
+      id: c.id || uid(), nome: nome || fmtTel(tel), tel: tel,
+      obs: $("#cObs").value.trim(), criadoEm: c.criadoEm || hoje()
+    });
     fecharSheet(); toast("Cliente salvo.");
   };
 }
 
+/* O historico completo de uma pessoa, todas as OCs que ela ja fez na loja. */
 function histCliente(id){
-  const vs = D().vendas.filter(v => v.clienteId === id).sort((a,b) => b.data.localeCompare(a.data));
-  if (!vs.length) return "";
-  const aberto = r2(vs.reduce((s,v) => s + abertoDe(v), 0));
-  return '<div class="sec"><span class="eyebrow">Compras dessa cliente</span>' +
-    '<div class="card" style="padding:13px">' +
-      '<div class="kv"><span class="k">Total comprado</span><span class="v mono">' + R$(r2(vs.reduce((s,v)=>s+totalVenda(v),0))) + '</span></div>' +
-      '<div class="kv"><span class="k">Em aberto</span><span class="v mono" style="color:' + (aberto ? "var(--bad)" : "var(--good)") + '">' + R$(aberto) + '</span></div>' +
-    '</div>' +
-    '<div class="list">' + vs.slice(0,6).map(v =>
-      '<div class="item"><div class="item-main"><div class="item-t">' + esc(v.itens.map(i=>i.nome).join(", ")) + '</div>' +
-      '<div class="item-s">' + fmtData(v.data) + '</div></div>' +
-      '<div class="item-r"><div class="item-v">' + R$(totalVenda(v)) + '</div></div></div>').join("") +
+  const c = buscarCliente(id);
+  const st = statsCliente(id);
+  const linhaKV = (k, v, cor) => '<div class="kv"><span class="k">' + k + '</span>' +
+    '<span class="v mono"' + (cor ? ' style="color:' + cor + '"' : '') + '>' + v + '</span></div>';
+
+  const resumo = '<div class="sec"><span class="eyebrow">Resumo</span><div class="card" style="padding:13px">' +
+    linhaKV("Compras", st.n) +
+    linhaKV("Total comprado", R$(st.total)) +
+    linhaKV("Ticket m\u00e9dio", R$(st.ticket)) +
+    linhaKV("Em aberto", R$(st.aberto), st.aberto > 0 ? "var(--bad)" : "var(--good)") +
+    (st.primeira ? linhaKV("Cliente desde", fmtData(st.primeira)) : "") +
+    (st.ultima ? linhaKV("\u00daltima compra", fmtData(st.ultima)) : "") +
     '</div></div>';
+
+  const cobrar = (c && c.tel && st.aberto > 0)
+    ? '<a class="btn btn-block" target="_blank" rel="noopener" href="' +
+      esc(linkWhats(c.tel, "Oi, " + String(c.nome).split(" ")[0] + "! Passando pra combinar o pagamento de " +
+        R$(st.aberto) + " que est\u00e1 em aberto. Qualquer coisa me chama!")) +
+      '">Falar no WhatsApp</a>'
+    : "";
+
+  if (!st.n) {
+    return resumo + '<div class="empty" style="padding:18px">Nenhuma compra registrada ainda.</div>';
+  }
+
+  const ocs = '<div class="sec"><span class="eyebrow">Ordens de compra</span><div class="list">' +
+    st.vendas.slice().reverse().map(v => {
+      const ab = abertoDe(v);
+      return '<button class="item" data-abrir="venda:' + v.id + '">' +
+        '<div class="item-main"><div class="item-t oc">' + esc(v.oc || "\u2014") + '</div>' +
+          '<div class="item-s">' + fmtData(v.data) + ' &middot; ' +
+            esc(v.itens.map(i => i.qtd + " \u00d7 " + i.nome).join(", ")) + '</div></div>' +
+        '<div class="item-r"><div class="item-v">' + R$(totalVenda(v)) + '</div>' +
+          '<div style="margin-top:3px">' + (ab > 0
+            ? '<span class="badge b-warn">falta ' + R$(ab) + '</span>'
+            : '<span class="badge b-good">Quitada</span>') + '</div></div>' + ICON.chev +
+      '</button>';
+    }).join("") + '</div></div>';
+
+  return resumo + cobrar + ocs;
 }
 
 /* =======================================================================
@@ -1557,9 +1739,14 @@ function telaVendas(){
   let vs = d.vendas.slice().sort((a,b) => b.data.localeCompare(a.data));
   if (UI.filtroVendas === "abertas") vs = vs.filter(v => !quitado(v));
   if (UI.filtroVendas === "quitadas") vs = vs.filter(v => quitado(v));
-  if (busca) vs = vs.filter(v =>
-    (v.clienteNome || "").toLowerCase().includes(busca) ||
-    v.itens.some(i => i.nome.toLowerCase().includes(busca)));
+  if (busca) {
+    const alvo = soDigitos(UI.buscaVendas);
+    vs = vs.filter(v =>
+      (v.clienteNome || "").toLowerCase().includes(busca) ||
+      (v.oc || "").toLowerCase().includes(busca) ||
+      (alvo && normTel(v.clienteTel || (buscarCliente(v.clienteId) || {}).tel).includes(alvo)) ||
+      v.itens.some(i => i.nome.toLowerCase().includes(busca)));
+  }
 
   const total = r2(vs.reduce((s,v) => s + totalVenda(v), 0));
   const lucro = r2(vs.reduce((s,v) => s + lucroVenda(v), 0));
@@ -1581,7 +1768,9 @@ function telaVendas(){
         '<button class="item" data-abrir="venda:' + v.id + '">' +
           '<div class="mrk">' + esc(String(v.clienteNome).trim().charAt(0).toUpperCase() || "?") + '</div>' +
           '<div class="item-main"><div class="item-t">' + esc(v.clienteNome) + '</div>' +
-            '<div class="item-s">' + fmtData(v.data) + ' &middot; ' + esc(v.itens.map(i => i.qtd + "× " + i.nome).join(", ")) + '</div></div>' +
+            '<div class="item-s"><span class="oc">' + esc(v.oc || "") + '</span>' +
+              (v.oc ? ' &middot; ' : '') + fmtData(v.data) + ' &middot; ' +
+              esc(v.itens.map(i => i.qtd + "× " + i.nome).join(", ")) + '</div></div>' +
           '<div class="item-r"><div class="item-v">' + R$(totalVenda(v)) + '</div>' +
             '<div style="margin-top:3px">' + st + '</div></div>' + ICON.chev +
         '</button></div>';
@@ -1590,7 +1779,7 @@ function telaVendas(){
 
   return barraDemo() +
     '<div class="stack">' +
-      '<input type="text" id="buscaVendas" placeholder="Buscar cliente ou perfume" value="' + esc(UI.buscaVendas) + '">' +
+      '<input type="text" id="buscaVendas" placeholder="Buscar por cliente, celular, OC ou perfume" value="' + esc(UI.buscaVendas) + '">' +
       '<div class="chips">' +
         chip("todas","Todas",UI.filtroVendas) +
         chip("abertas","Em aberto",UI.filtroVendas) +
@@ -1870,21 +2059,48 @@ function telaCompras(){
 
 function telaClientes(){
   const d = D();
-  const cs = d.clientes.slice().sort((a,b) => a.nome.localeCompare(b.nome,"pt-BR"));
-  if (!cs.length) return barraDemo() + '<div class="empty"><strong>Nenhum cliente ainda</strong>Os clientes são criados sozinhos quando você registra uma venda.</div>';
-  return barraDemo() + '<div class="list">' + cs.map(c => {
-    const vs = d.vendas.filter(v => v.clienteId === c.id);
-    const ab = r2(vs.reduce((s,v) => s + abertoDe(v), 0));
-    return '<button class="item" data-cliente="' + c.id + '">' +
-      '<div class="mrk">' + esc(c.nome.trim().charAt(0).toUpperCase()) + '</div>' +
-      '<div class="item-main"><div class="item-t">' + esc(c.nome) + '</div>' +
-        '<div class="item-s">' + vs.length + (vs.length === 1 ? " compra" : " compras") +
-          (c.tel ? " &middot; WhatsApp salvo" : " &middot; sem telefone") + '</div></div>' +
-      '<div class="item-r">' + (ab > 0
-        ? '<span class="badge b-warn">deve ' + R$(ab) + '</span>'
-        : '<span class="badge b-neutral">em dia</span>') + '</div>' + ICON.chev +
-    '</button>';
-  }).join("") + '</div>';
+  const busca = UI.buscaClientes.toLowerCase();
+  const alvo = soDigitos(UI.buscaClientes);
+  let cs = d.clientes.slice();
+  if (busca) {
+    cs = cs.filter(c => c.nome.toLowerCase().includes(busca) ||
+      (alvo && normTel(c.tel).includes(alvo)));
+  }
+  cs.sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  const campo = '<input type="text" id="buscaClientes" placeholder="Buscar por nome ou celular" value="' +
+    esc(UI.buscaClientes) + '">';
+
+  if (!d.clientes.length) {
+    return barraDemo() + '<div class="empty"><strong>Nenhum cliente ainda</strong>' +
+      'Os clientes s\u00e3o criados sozinhos quando voc\u00ea registra uma venda com o celular.</div>';
+  }
+  if (!cs.length) {
+    return barraDemo() + '<div class="stack">' + campo +
+      '<div class="empty"><strong>Ningu\u00e9m encontrado</strong>Tente outro nome ou n\u00famero.</div></div>';
+  }
+
+  const devendo = r2(d.clientes.reduce((a,c) => a + statsCliente(c.id).aberto, 0));
+  const comDivida = d.clientes.filter(c => statsCliente(c.id).aberto > 0).length;
+
+  return barraDemo() + '<div class="stack">' + campo +
+    '<div class="tiles">' +
+      tile("Clientes", d.clientes.length, cs.length !== d.clientes.length ? cs.length + " no filtro" : "cadastrados") +
+      tile("A receber deles", R$(devendo), comDivida + (comDivida === 1 ? " pessoa deve" : " pessoas devem")) +
+    '</div>' +
+    '<div class="list">' + cs.map(c => {
+      const st = statsCliente(c.id);
+      return '<button class="item" data-cliente="' + c.id + '">' +
+        '<div class="mrk">' + esc(c.nome.trim().charAt(0).toUpperCase() || "?") + '</div>' +
+        '<div class="item-main"><div class="item-t">' + esc(c.nome) + '</div>' +
+          '<div class="item-s">' + (c.tel ? '<span class="tel">' + fmtTel(c.tel) + '</span>' : "sem celular") +
+            ' &middot; ' + st.n + (st.n === 1 ? " compra" : " compras") + '</div></div>' +
+        '<div class="item-r"><div class="item-v">' + R$(st.total) + '</div>' +
+          '<div style="margin-top:3px">' + (st.aberto > 0
+            ? '<span class="badge b-warn">deve ' + R$(st.aberto) + '</span>'
+            : '<span class="badge b-neutral">em dia</span>') + '</div></div>' + ICON.chev +
+      '</button>';
+    }).join("") + '</div></div>';
 }
 
 function telaBackup(){
@@ -1923,6 +2139,8 @@ function telaAjuda(){
       passo(4, "Dê o nome <b>MF Imports</b> e toque em <b>Adicionar</b>.") +
     '</div></div>' +
     '<div class="sec"><span class="eyebrow">Boas práticas</span><div class="list">' +
+      passo("•", "Sempre peça o <b>celular</b>. É ele que junta todas as compras da pessoa — nome se repete e se escreve de vários jeitos, número não. Ninguém precisa dar CPF.") +
+      passo("•", "Cada venda vira uma <b>Ordem de Compra</b> numerada. Dá para mandar a OC no WhatsApp do cliente: ele fica com o comprovante e você com o histórico.") +
       passo("•", "Lance a venda na hora, ainda com a cliente na frente — leva menos de um minuto.") +
       passo("•", "Registre a compra no distribuidor assim que ela chegar: é isso que alimenta o estoque e o custo.") +
       passo("•", "Marque a parcela como paga no dia em que o dinheiro entrar, não antes.") +
@@ -1943,10 +2161,11 @@ function montarCSV(linhas){
   return "﻿" + linhas.map(l => l.map(csvEsc).join(";")).join("\r\n");
 }
 function csvVendas(){
-  const linhas = [["Data","Cliente","Perfumes","Qtd","Total","Custo","Lucro","Pagamento","Parcelas","Pagas","Em aberto"]];
+  const linhas = [["OC","Data","Cliente","Celular","Perfumes","Qtd","Total","Custo","Lucro","Pagamento","Parcelas","Pagas","Em aberto"]];
   D().vendas.slice().sort((a,b) => a.data.localeCompare(b.data)).forEach(v => {
     linhas.push([
-      fmtData(v.data), v.clienteNome,
+      v.oc || "", fmtData(v.data), v.clienteNome,
+      fmtTel(v.clienteTel || (buscarCliente(v.clienteId) || {}).tel),
       v.itens.map(i => i.qtd + "x " + i.nome).join(" | "),
       v.itens.reduce((s,i) => s + i.qtd, 0),
       moneyShort.format(totalVenda(v)), moneyShort.format(custoVenda(v)), moneyShort.format(lucroVenda(v)),
@@ -2147,14 +2366,15 @@ document.addEventListener("click", e => {
   }
 });
 
+const BUSCAS = { buscaVendas:"buscaVendas", buscaClientes:"buscaClientes" };
 document.addEventListener("input", e => {
-  if (e.target.id === "buscaVendas") {
-    UI.buscaVendas = e.target.value;
-    const pos = e.target.selectionStart;
-    render();
-    const novo = $("#buscaVendas");
-    if (novo) { novo.focus(); novo.setSelectionRange(pos, pos); }
-  }
+  const chave = BUSCAS[e.target.id];
+  if (!chave) return;
+  UI[chave] = e.target.value;
+  const id = e.target.id, pos = e.target.selectionStart;
+  render();
+  const novo = document.getElementById(id);
+  if (novo) { novo.focus(); novo.setSelectionRange(pos, pos); }
 });
 
 document.addEventListener("keydown", e => {
@@ -2163,6 +2383,7 @@ document.addEventListener("keydown", e => {
 
 /* ---------- start ---------- */
 lerLocal();
+numerarVendasAntigas();
 render();
 if (window.claude && typeof window.claude.use === "function") iniciarNuvem();
 
