@@ -280,6 +280,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 .margem{font-size:11.5px;color:var(--ink-3);line-height:1.4}
 .margem .ok{color:var(--good);font-weight:700}
 .margem .ruim{color:var(--bad);font-weight:700}
+.margem b{color:var(--ink);font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.lnk{background:none;border:0;padding:0;color:var(--gold);font-weight:700;font-size:11.5px;
+  text-decoration:underline;text-underline-offset:2px}
+.itemrow select{font-size:16px}
 
 .toggle{display:flex;align-items:flex-start;gap:11px;padding:12px;border-radius:12px;
   background:var(--surface);border:1px solid var(--line-2);text-align:left;width:100%}
@@ -1079,7 +1083,7 @@ function novoRascunhoVenda(v){
   if (v) return JSON.parse(JSON.stringify(v));
   return {
     id:null, data:hoje(), clienteNome:"", clienteTel:"",
-    itens:[{ nome:"", qtd:1, precoUnit:"" }],
+    itens:[{ produtoId:"", nome:"", qtd:1, precoUnit:"" }],
     desconto:"", taxaPct:"", forma:"pix", cartaoParc:false,
     nParc:2, primeira:addMeses(hoje(),1), obs:""
   };
@@ -1088,7 +1092,7 @@ function novoRascunhoCompra(c){
   if (c) return JSON.parse(JSON.stringify(c));
   return {
     id:null, data:hoje(), fornecedorNome:"",
-    itens:[{ nome:"", qtd:1, custoUnit:"", precoVenda:"" }],
+    itens:[{ produtoId:"", nome:"", qtd:1, custoUnit:"", precoVenda:"" }],
     forma:"pix", nParc:2, primeira:addMeses(hoje(),1), obs:""
   };
 }
@@ -1105,15 +1109,62 @@ function margemHTML(it){
   return "Por quanto você quer revender. Fica salvo e já vem preenchido na venda.";
 }
 
+/* Lista de perfumes para escolher. Mostra o estoque junto, que e a informacao
+   que ela precisa na hora de vender. A ultima opcao abre um campo de texto,
+   para o perfume que ainda nao existe no cadastro. */
+function opcoesProduto(escolhido){
+  const ps = S.produtos.slice().sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  let h = '<option value="">Escolha o perfume…</option>';
+  ps.forEach(p => {
+    const e = estoqueDe(p.id);
+    const rot = p.nome + (p.ml ? " " + p.ml + "ml" : "") +
+      "  ·  " + (e > 0 ? e + " un." : "sem estoque");
+    h += '<option value="' + esc(p.id) + '"' + (escolhido === p.id ? " selected" : "") + '>' +
+      esc(rot) + '</option>';
+  });
+  h += '<option value="__novo"' + (escolhido === "__novo" ? " selected" : "") +
+    '>+ Outro perfume (digitar)</option>';
+  return h;
+}
+
+/* Linha de apoio embaixo do item: na venda, o preco sugerido e o estoque;
+   na compra, a margem que aquele preco de revenda deixa. */
+function apoioItem(tipo, it, i){
+  if (tipo === "compra") return margemHTML(it);
+  if (it.produtoId === "__novo") return "Perfume novo — será cadastrado com o preço que você puser aqui.";
+  const p = S.produtos.find(x => x.id === it.produtoId);
+  if (!p) return "Escolha o perfume na lista para ver o preço sugerido.";
+  const e = estoqueDe(p.id);
+  const sug = Number(p.preco) || 0;
+  const digitado = parseMoney(it.precoUnit);
+  const partes = [];
+  if (sug > 0) partes.push("Sugerido <b>" + R$(sug) + "</b>");
+  else partes.push("Sem preço sugerido ainda");
+  partes.push(e > 0 ? e + " em estoque" : '<span class="ruim">sem estoque</span>');
+  let h = partes.join(" &middot; ");
+  if (sug > 0 && digitado > 0 && Math.abs(digitado - sug) > 0.005) {
+    h += ' &middot; <button type="button" class="lnk" data-sug="' + i + '">usar o sugerido</button>';
+  }
+  return h;
+}
+
 function htmlItens(tipo){
+  const temProdutos = S.produtos.length > 0;
   return rascunho.itens.map((it, i) => {
-    const cabeca =
-      '<div class="itemrow-head">' +
-        '<input type="text" class="grow" data-f="nome" list="dl-produtos" placeholder="Nome do perfume" value="' + esc(it.nome) + '" autocomplete="off">' +
-        (rascunho.itens.length > 1
-          ? '<button class="del" data-rm="' + i + '" aria-label="Remover item">' + ICON.x + '</button>'
-          : '') +
-      '</div>';
+    const remover = rascunho.itens.length > 1
+      ? '<button class="del" data-rm="' + i + '" aria-label="Remover item">' + ICON.x + '</button>'
+      : '';
+    /* Sem nenhum perfume cadastrado ainda, nao ha o que escolher: cai no texto. */
+    const escolher = temProdutos
+      ? '<select class="grow" data-f="produtoId">' + opcoesProduto(it.produtoId || "") + '</select>'
+      : '<input type="text" class="grow" data-f="nome" placeholder="Nome do perfume" value="' +
+        esc(it.nome) + '" autocomplete="off">';
+    const digitarNovo = (temProdutos && it.produtoId === "__novo")
+      ? '<input type="text" data-f="nome" placeholder="Nome do perfume novo" value="' +
+        esc(it.nome) + '" autocomplete="off">'
+      : '';
+
+    const cabeca = '<div class="itemrow-head">' + escolher + remover + '</div>' + digitarNovo;
 
     if (tipo === "venda") {
       return '<div class="itemrow" data-i="' + i + '">' + cabeca +
@@ -1123,6 +1174,7 @@ function htmlItens(tipo){
           '<div class="field"><label>Preço un.</label>' +
             '<input type="text" inputmode="decimal" class="money-in" data-f="precoUnit" placeholder="0,00" value="' + esc(it.precoUnit) + '"></div>' +
         '</div>' +
+        '<div class="margem">' + apoioItem("venda", it, i) + '</div>' +
       '</div>';
     }
 
@@ -1135,7 +1187,7 @@ function htmlItens(tipo){
         '<div class="field"><label>Venda un.</label>' +
           '<input type="text" inputmode="decimal" class="money-in" data-f="precoVenda" placeholder="0,00" value="' + esc(it.precoVenda || "") + '"></div>' +
       '</div>' +
-      '<div class="margem">' + margemHTML(it) + '</div>' +
+      '<div class="margem">' + apoioItem("compra", it, i) + '</div>' +
     '</div>';
   }).join("");
 }
@@ -1293,13 +1345,12 @@ function ligarForm(tipo){
     if (t) t.textContent = R$(totalRascunho(tipo));
     const pv = $("#previa", body);
     if (pv) pv.innerHTML = htmlPrevia(tipo);
-    if (tipo === "compra") {
-      body.querySelectorAll("#itens [data-i]").forEach(el => {
-        const it = rascunho.itens[Number(el.dataset.i)];
-        const alvo = el.querySelector(".margem");
-        if (it && alvo) alvo.innerHTML = margemHTML(it);
-      });
-    }
+    body.querySelectorAll("#itens [data-i]").forEach(el => {
+      const i = Number(el.dataset.i);
+      const it = rascunho.itens[i];
+      const alvo = el.querySelector(".margem");
+      if (it && alvo) alvo.innerHTML = apoioItem(tipo, it, i);
+    });
     if (tipo === "venda") {
       const ficha = $("#fichaCli", body);
       const c = clientePorTel(rascunho.clienteTel);
@@ -1347,8 +1398,8 @@ function ligarForm(tipo){
     if (add) {
       lerCampos();
       rascunho.itens.push(tipo === "venda"
-        ? { nome:"", qtd:1, precoUnit:"" }
-        : { nome:"", qtd:1, custoUnit:"", precoVenda:"" });
+        ? { produtoId:"", nome:"", qtd:1, precoUnit:"" }
+        : { produtoId:"", nome:"", qtd:1, custoUnit:"", precoVenda:"" });
       $("#itens", body).innerHTML = htmlItens(tipo);
       atualizarTotais();
       const ins = body.querySelectorAll('#itens [data-f="nome"]');
@@ -1368,29 +1419,69 @@ function ligarForm(tipo){
 
   sheetSalvar = tipo === "venda" ? salvarVenda : salvarCompra;
 
-  /* Ao escolher um perfume já cadastrado, traz os valores que ela já usou. */
-  function sugerir(el){
-    const linha = el.closest("[data-i]");
-    if (!linha) return;
-    const p = S.produtos.find(x => x.nome.toLowerCase() === el.value.trim().toLowerCase());
-    if (!p) return;
-    const i = Number(linha.dataset.i);
+  /* Escolher o perfume na lista ja traz os valores dele, para ela so confirmar. */
+  function preencherDoProduto(i, p, forcar){
+    const it = rascunho.itens[i];
     const por = (campo, valor) => {
-      const alvo = linha.querySelector('[data-f="' + campo + '"]');
-      if (!alvo || alvo.value || !valor) return;
-      alvo.value = moneyShort.format(valor);
-      rascunho.itens[i][campo] = alvo.value;
+      if (!valor) return;
+      if (!forcar && String(it[campo] || "").trim()) return;
+      it[campo] = moneyShort.format(valor);
     };
     if (tipo === "venda") por("precoUnit", Number(p.preco) || 0);
     else { por("custoUnit", custoMedio(p.id)); por("precoVenda", Number(p.preco) || 0); }
-    atualizarTotais();
   }
+
   body.addEventListener("change", e => {
-    if (e.target.matches('#itens [data-f="nome"]')) sugerir(e.target);
+    const sel = e.target.closest('#itens [data-f="produtoId"]');
+    if (!sel) return;
+    lerCampos();
+    const linha = sel.closest("[data-i]");
+    const i = Number(linha.dataset.i);
+    const p = S.produtos.find(x => x.id === rascunho.itens[i].produtoId);
+    if (p) {
+      rascunho.itens[i].nome = p.nome;
+      preencherDoProduto(i, p, true);   /* trocou de perfume: os valores dele mandam */
+    } else {
+      rascunho.itens[i].nome = "";
+    }
+    $("#itens", body).innerHTML = htmlItens(tipo);
+    atualizarTotais();
+    if (rascunho.itens[i].produtoId === "__novo") {
+      const novo = body.querySelector('#itens [data-i="' + i + '"] [data-f="nome"]');
+      if (novo) novo.focus();
+    }
   });
+
+  /* "usar o sugerido": devolve o preco do cadastro ao campo. */
+  body.addEventListener("click", e => {
+    const b = e.target.closest("[data-sug]");
+    if (!b) return;
+    lerCampos();
+    const i = Number(b.dataset.sug);
+    const p = S.produtos.find(x => x.id === rascunho.itens[i].produtoId);
+    if (!p) return;
+    preencherDoProduto(i, p, true);
+    $("#itens", body).innerHTML = htmlItens(tipo);
+    atualizarTotais();
+  });
+
+  /* Sem nada cadastrado ainda o campo e de texto; ali o nome digitado sugere. */
   body.addEventListener("input", e => {
-    if (e.target.matches('#itens [data-f="nome"]')) sugerir(e.target);
+    const el = e.target.closest('#itens [data-f="nome"]');
+    if (!el) return;
+    const linha = el.closest("[data-i]");
+    const i = Number(linha.dataset.i);
+    const p = S.produtos.find(x => x.nome.toLowerCase() === el.value.trim().toLowerCase());
+    if (!p) return;
+    preencherDoProduto(i, p, false);
+    atualizarTotais();
   });
+}
+
+/* O perfume escolhido na lista, quando nao for a opcao de digitar um novo. */
+function escolhido(it){
+  if (!it.produtoId || it.produtoId === "__novo") return null;
+  return S.produtos.find(x => x.id === it.produtoId) || null;
 }
 
 function montarParcelas(total, rasc, anterior, tipo){
@@ -1432,9 +1523,10 @@ function salvarVenda(){
   }
 
   const itens = rascunho.itens
-    .filter(it => String(it.nome).trim() && parseMoney(it.qtd) > 0)
+    .filter(it => (escolhido(it) || String(it.nome).trim()) && parseMoney(it.qtd) > 0)
     .map(it => {
-      const p = acharOuCriar("produtos", it.nome, { marca:"", ml:"", preco: parseMoney(it.precoUnit) });
+      const p = escolhido(it) ||
+        acharOuCriar("produtos", it.nome, { marca:"", ml:"", preco: parseMoney(it.precoUnit) });
       return {
         produtoId: p.id, nome: p.nome,
         qtd: parseMoney(it.qtd),
@@ -1478,10 +1570,11 @@ function salvarCompra(){
   });
 
   const itens = rascunho.itens
-    .filter(it => String(it.nome).trim() && parseMoney(it.qtd) > 0)
+    .filter(it => (escolhido(it) || String(it.nome).trim()) && parseMoney(it.qtd) > 0)
     .map(it => {
       const preco = parseMoney(it.precoVenda);
-      const p = acharOuCriar("produtos", it.nome, { marca:"", ml:"", preco: preco });
+      const p = escolhido(it) ||
+        acharOuCriar("produtos", it.nome, { marca:"", ml:"", preco: preco });
       if (preco > 0 && Number(p.preco) !== preco) { p.preco = preco; salvarSilencioso("produtos", p); }
       return {
         produtoId: p.id, nome: p.nome, qtd: parseMoney(it.qtd),
