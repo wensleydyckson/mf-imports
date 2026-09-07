@@ -30,9 +30,14 @@ Por isso o backup importa — veja o final deste arquivo.
    icon-192.png
    icon-512.png
    apple-touch-icon.png
+   logo.png
    .nojekyll
    README.md
    ```
+
+   > `logo.png` (1024px) é o logo dela recortado e limpo, guardado aqui como
+   > arquivo da marca. O app não depende dele — a imagem já vai embutida no
+   > `index.html` —, mas serve para posts, etiqueta e o que mais precisar.
 
    > O `.nojekyll` costuma ficar escondido no Explorer do Windows. Em
    > **Exibir → Mostrar → Itens ocultos** ele aparece. Se não conseguir enviar,
